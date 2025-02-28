@@ -1,0 +1,10 @@
+{
+  "transactions": [
+    {
+      "rpc": "https://interop-alpha-1.optimism.io"
+    },
+    {
+      "rpc": "https://interop-alpha-1.optimism.io"
+    }
+  ]
+}
