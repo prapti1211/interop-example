@@ -31,6 +31,7 @@ contract InteropBridge {
     error CallFailed(address target, bytes reason);
     error InvalidCaller();
     error CannotSendToSameChain();
+    error MessageAlreadyExecuted();
     
     // State variables
     mapping(bytes32 => bool) public executedMessages;
@@ -59,13 +60,15 @@ contract InteropBridge {
             targetContract,  // target contract to call
             data             // function data to execute
         );
+        
         // Send the message through the cross-domain messenger
         bytes32 msgHash = IL2ToL2CrossDomainMessenger(PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER)
-            .sendMessage(
-                uint256(uint160(address(this))),  // The interop contract on the target chain
-                address(uint160(bytes20(message))), // Convert bytes to address
-                abi.encodePacked(uint256(1000000)) // Convert gas limit to bytes
-            );
+    .sendMessage(
+        targetChainId,  // Target chain ID representation
+        address(this),  // The interop contract on the target chain
+        message  // The full message to be sent
+    );
+        
         emit CrossChainFunctionCalled(
             targetChainId,
             targetContract,
@@ -100,6 +103,19 @@ contract InteropBridge {
             revert InvalidCaller();
         }
         
+        // Compute the message hash
+        bytes32 msgHash = keccak256(abi.encode(
+            sourceChainId,
+            sourceContract,
+            targetContract,
+            data
+        ));
+        
+        // Ensure the message has not been executed
+        if (executedMessages[msgHash]) {
+            revert MessageAlreadyExecuted();
+        }
+        
         // Emit an event for the received cross-chain call
         emit CrossChainCallReceived(
             sourceChainId,
@@ -114,6 +130,9 @@ contract InteropBridge {
             revert CallFailed(targetContract, result);
         }
         
+        // Mark the message as executed
+        executedMessages[msgHash] = true;
+        
         return (success, result);
     }
     
@@ -123,8 +142,9 @@ contract InteropBridge {
      * @return True if the message has been executed successfully
      */
     function isMessageExecuted(bytes32 msgHash) external view returns (bool) {
-        return IL2ToL2CrossDomainMessenger(PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER)
-            .successfulMessages(msgHash);
+        return executedMessages[msgHash] || 
+            IL2ToL2CrossDomainMessenger(PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER)
+                .successfulMessages(msgHash);
     }
     
     /**
@@ -133,6 +153,9 @@ contract InteropBridge {
      * @param msgHash The hash of the message to wait for
      */
     function waitForMessage(bytes32 msgHash) external view {
-        CrossDomainMessageLib.requireMessageSuccess(msgHash);
+        require(
+            this.isMessageExecuted(msgHash), // Use `this` to call the external function
+            "Message not executed"
+        );
     }
 }
